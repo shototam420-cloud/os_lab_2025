@@ -1,63 +1,50 @@
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-
+#define _POSIX_C_SOURCE 200809L
+#include <getopt.h>
+#include <inttypes.h>
 #include <pthread.h>
-
-struct SumArgs {
-  int *array;
-  int begin;
-  int end;
-};
-
-int Sum(const struct SumArgs *args) {
-  int sum = 0;
-  // TODO: your code here 
-  return sum;
-}
-
-void *ThreadSum(void *args) {
-  struct SumArgs *sum_args = (struct SumArgs *)args;
-  return (void *)(size_t)Sum(sum_args);
-}
-
+#include <time.h>
+#include "../../common/lab_args.h"
+#include "utils.h"
+#include "sum.h"
 int main(int argc, char **argv) {
-  /*
-   *  TODO:
-   *  threads_num by command line arguments
-   *  array_size by command line arguments
-   *	seed by command line arguments
-   */
-
-  uint32_t threads_num = 0;
-  uint32_t array_size = 0;
-  uint32_t seed = 0;
-  pthread_t threads[threads_num];
-
-  /*
-   * TODO:
-   * your code here
-   * Generate array here
-   */
-
-  int *array = malloc(sizeof(int) * array_size);
-
-  struct SumArgs args[threads_num];
-  for (uint32_t i = 0; i < threads_num; i++) {
-    if (pthread_create(&threads[i], NULL, ThreadSum, (void *)&args)) {
-      printf("Error: pthread_create failed!\n");
-      return 1;
+    int count = -1, n = -1, seed = -1, c;
+    const struct option options[] = {
+        {"threads_num", required_argument, NULL, 't'},
+        {"seed", required_argument, NULL, 's'},
+        {"array_size", required_argument, NULL, 'a'}, {0, 0, 0, 0}
+    };
+    while ((c = getopt_long(argc, argv, "", options, NULL)) != -1) {
+        switch (c) {
+            case 't': count = number(optarg, 1); break;
+            case 's': seed = number(optarg, 0); break;
+            case 'a': n = number(optarg, 1); break;
+            default: return EXIT_FAILURE;
+        }
     }
-  }
-
-  int total_sum = 0;
-  for (uint32_t i = 0; i < threads_num; i++) {
-    int sum = 0;
-    pthread_join(threads[i], (void **)&sum);
-    total_sum += sum;
-  }
-
-  free(array);
-  printf("Total: %d\n", total_sum);
-  return 0;
+    if (count < 1 || count > 1024 || n < 1 || seed < 0 || optind != argc) {
+        fprintf(stderr, "Usage: %s --threads_num 1..1024 --seed N --array_size N\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+    int *array = checked_calloc((size_t)n, sizeof(*array));
+    GenerateArray(array, (unsigned)n, (unsigned)seed);
+    pthread_t *threads = checked_calloc((size_t)count, sizeof(*threads));
+    struct SumArgs *args = checked_calloc((size_t)count, sizeof(*args));
+    struct timespec start, finish;
+    if (clock_gettime(CLOCK_MONOTONIC, &start)) { perror("clock_gettime"); return 1; }
+    for (int i = 0; i < count; ++i) {
+        args[i] = (struct SumArgs){array, (size_t)n * (size_t)i / (size_t)count,
+            (size_t)n * (size_t)(i + 1) / (size_t)count, 0};
+        thread_check(pthread_create(&threads[i], NULL, ThreadSum, &args[i]), "pthread_create");
+    }
+    int64_t total = 0;
+    for (int i = 0; i < count; ++i) {
+        thread_check(pthread_join(threads[i], NULL), "pthread_join");
+        total += args[i].result;
+    }
+    if (clock_gettime(CLOCK_MONOTONIC, &finish)) { perror("clock_gettime"); return 1; }
+    double ms = (finish.tv_sec - start.tv_sec) * 1000.0
+              + (finish.tv_nsec - start.tv_nsec) / 1000000.0;
+    printf("Total: %" PRId64 "\nElapsed time: %.3f ms\n", total, ms);
+    free(args); free(threads); free(array);
+    return 0;
 }

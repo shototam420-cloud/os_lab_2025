@@ -1,0 +1,5 @@
+/mutex_no
+/mutex_yes
+/factorial
+/deadlock
+*.o
